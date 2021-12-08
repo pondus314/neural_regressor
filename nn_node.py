@@ -31,21 +31,21 @@ class BlackBoxNode(NnNode):
 
 
 class GreyBoxNode(NnNode):
-    def __init__(self, operation, children, child_input_idxs=None):
+    def __init__(self, operation, child_nodes, child_input_idxs=None):
         super(GreyBoxNode, self).__init__()
         self.operation: Operation = operation
-        self.children: List[NnNode] = children  # operation no of inputs must match no of children
+        self.child_nodes: List[NnNode] = child_nodes
         self.child_input_idxs: Dict[NnNode, List[int]] = child_input_idxs
 
     def forward(self, *inputs) -> torch.Tensor:
-        if len(self.children) == 1:
-            child_output: torch.Tensor = self.children[0].forward(torch.cat(inputs, 1))
-            out = self.operation.forward(child_output)
+        if len(self.child_nodes) == 1:
+            child_output: torch.Tensor = self.child_nodes[0](torch.cat(inputs, 1))
+            out = self.operation(child_output)
             return out
 
         children_outputs = []
-        for child in self.children:
-            child_inputs = torch.cat([inputs[idx] for idx in self.child_input_idxs[child]],1)
-            children_outputs.append(child.forward(child_inputs))
-        out = self.operation.forward(children_outputs)
+        for child in self.child_nodes:
+            child_inputs = torch.cat([inputs[idx] for idx in self.child_input_idxs[child]], 1)
+            children_outputs.append(child(child_inputs))
+        out = self.operation(children_outputs)
         return out
