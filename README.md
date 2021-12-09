@@ -1,1 +1,1 @@
-# nerual_regressor
+# neural_regressor
