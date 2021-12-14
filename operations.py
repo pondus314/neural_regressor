@@ -68,9 +68,9 @@ class MultivariateOperation(Operation):
 
     def forward(self, *inputs) -> torch.Tensor:
         if self.operation_type == MultivariateOp.MULTIPLY:
-            output = torch.prod(torch.cat(inputs, 1), dim=1, keepdim=True)
+            output = torch.prod(torch.cat(inputs, 1), dim=2, keepdim=True)
         elif self.operation_type == MultivariateOp.ADD:
-            output = torch.sum(torch.cat(inputs, 1), dim=1, keepdim=True)
+            output = torch.sum(torch.cat(inputs, 1), dim=2, keepdim=True)
         else:
             raise TypeError("operation_type needs to be a MultivariateOp")
 
