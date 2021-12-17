@@ -8,9 +8,9 @@ class GeneratorDataset(Dataset):
         self.distribution = input_dist
         self.size = size
         self.samples = self.distribution.sample((size,))
-        if self.samples.dim() == 1:
-            self.samples = torch.unsqueeze(self.samples, 1)
-        self.values = [function(*sample) for sample in self.samples]
+
+        self.samples = self.samples.view(size, 1, -1)
+        self.values = [function(*sample[0]) for sample in self.samples]
 
     def __len__(self):
         return self.size

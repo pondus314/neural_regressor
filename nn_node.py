@@ -18,20 +18,25 @@ class NnNode(nn.Module, metaclass=abc.ABCMeta):
 
 
 class BlackBoxNode(NnNode):
-    def __init__(self, n_inputs):
+    def __init__(self, n_inputs, is_root: bool = False):
         super(BlackBoxNode, self).__init__()
         self.flatten: nn.Flatten = nn.Flatten()
         self.black_box: nn.Sequential = create_black_box(n_inputs)
+        self.is_root = is_root
 
     def forward(self, *inputs) -> torch.Tensor:
         inputs = torch.cat(inputs, 0)
         x = self.flatten(inputs)
         out = self.black_box(x)
+        if self.is_root:
+            out = out.squeeze()
+        elif out.dim() == 2:
+            out = out.unsqueeze(1)
         return out
 
 
 class GreyBoxNode(NnNode):
-    def __init__(self, operation, child_nodes, child_input_idxs=None):
+    def __init__(self, operation, child_nodes: List[NnNode], child_input_idxs=None, is_root: bool = False):
         super(GreyBoxNode, self).__init__()
         self.operation: Operation = operation
         self.child_nodes: List[NnNode] = child_nodes
@@ -54,4 +59,6 @@ class GreyBoxNode(NnNode):
             children_outputs.append(child(child_inputs))
         children_outputs = torch.cat(children_outputs, 2)
         out = self.operation(children_outputs)
+        if self.is_root:
+            return out.squeeze()
         return out
