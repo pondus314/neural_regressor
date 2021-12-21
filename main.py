@@ -51,7 +51,7 @@ if __name__ == '__main__':
         is_root=True,
     )
     distribution = torch.distributions.HalfNormal(torch.ones((3,))*10)
-    dataset = generated_dataset.GeneratorDataset(f, distribution, 6000)
+    dataset = generated_dataset.GeneratorDataset(f, distribution, 20000)
     trainloader = DataLoader(dataset, batch_size=16, shuffle=True)
 
     hybrid_child_1 = nn_node.BlackBoxNode(1)
@@ -72,31 +72,52 @@ if __name__ == '__main__':
         lr=0.001,
         max_lr=0.005,
         train_loader=trainloader,
+        show_losses=True,
     )
 
-    hybrid_trainer.train()
+    # hybrid_trainer.train()
+    # utils.save_model(hybrid_tree, 'hybrid_tree_100')
+    utils.load_model(hybrid_tree, 'hybrid_tree_100-20211220-185026.pt')
     hybrid_tree.eval()
     hybrid_tree.cpu()
 
     black_box = nn_node.BlackBoxNode(3, is_root=True)
-    blackbox_trainer = trainers.ModelTrainer(model=black_box, epochs=100, lr=0.001, train_loader=trainloader)
+    blackbox_trainer = trainers.ModelTrainer(
+        model=black_box,
+        epochs=100,
+        lr=0.001,
+        max_lr=0.005,
+        train_loader=trainloader,
+        show_losses=True,
+    )
 
-    blackbox_trainer.train()
+    # blackbox_trainer.train()
+    # utils.save_model(black_box, 'black_box_100')
+    utils.load_model(black_box, 'black_box_100-20211220-185334.pt')
     black_box.eval()
     black_box.cpu()
 
-    model_trainer = trainers.ModelTrainer(model=tree, epochs=40, lr=0.005, train_loader=trainloader)
+    tree_trainer = trainers.ModelTrainer(
+        model=tree,
+        epochs=20,
+        lr=0.005,
+        max_lr=0.01,
+        train_loader=trainloader,
+        show_losses=True,
+    )
 
-    model_trainer.train()
+    # tree_trainer.train()
+    # utils.save_model(tree, 'tree_20')
+    utils.load_model(tree, 'tree_20-20211220-193411.pt')
     tree.eval()
     tree.cpu()
-    print(list(tree.parameters()))
+    # print(list(tree.parameters()))
 
-    print(f(2., 0., 3.), f(1., 2., 7.))
-    print(tree(torch.tensor([[[2., 0., 3.]], [[1., 2., 7.]]])))
-    print(black_box(torch.tensor([[[2., 0., 3.]], [[1., 2., 7.]]])))
-    print(hybrid_tree(torch.tensor([[[2., 0., 3.]], [[1., 2., 7.]]])))
+    # print(f(2., 0., 3.), f(1., 2., 7.))
+    # print(tree(torch.tensor([[[2., 0., 3.]], [[1., 2., 7.]]])))
+    # print(black_box(torch.tensor([[[2., 0., 3.]], [[1., 2., 7.]]])))
+    # print(hybrid_tree(torch.tensor([[[2., 0., 3.]], [[1., 2., 7.]]])))
 
-    utils.save_model(tree, 'tree')
-    utils.save_model(hybrid_tree, 'hybrid_tree')
-    utils.save_model(black_box, 'black_box')
+    trainers.MetaTrainer.test_additive_separability(tree, distribution)
+    trainers.MetaTrainer.test_additive_separability(black_box, distribution)
+    trainers.MetaTrainer.test_additive_separability(hybrid_tree, distribution)

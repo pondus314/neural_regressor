@@ -45,4 +45,31 @@ class ModelTrainer:
 
 
 class MetaTrainer:
+
+    @staticmethod
+    def test_additive_separability(model, distribution: torch.distributions.Distribution, n_tests=20):
+        x = distribution.sample((n_tests,)).requires_grad_(True)
+        y = model(x)
+        dydx = torch.autograd.grad(y.sum(), x, create_graph=True)[0]
+        d2ydx = torch.stack([torch.autograd.grad(dydx[:, i].sum(), x, create_graph=True)[0] for i in range(3)], dim=2)
+        print(d2ydx)
+        # TODO: finish implementing the test properly
+
+    @staticmethod
+    def test_multiplicative_separability(model, distribution: torch.distributions.Distribution, n_tests=20):
+        x = distribution.sample((n_tests,)).requires_grad_(True)
+        y = model(x)
+        dydx = torch.autograd.grad(y.sum(), x, create_graph=True)[0]
+        d2ydx_divf = torch.stack(
+            [torch.autograd.grad((dydx[:, i] / y).sum(), x, create_graph=True)[0] for i in range(3)], dim=2)
+        print(d2ydx_divf)
+        # TODO: finish implementing the test properly
+
+    def __init__(self):
+        # TODO: implement this properly
+
+        pass
+
+    # TODO: implement the training part
+
     pass

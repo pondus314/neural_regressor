@@ -1,4 +1,4 @@
-from typing import List, Dict
+from typing import List, Dict, Optional
 
 import torch
 import abc
@@ -39,8 +39,9 @@ class GreyBoxNode(NnNode):
     def __init__(self, operation, child_nodes: List[NnNode], child_input_idxs=None, is_root: bool = False):
         super(GreyBoxNode, self).__init__()
         self.operation: Operation = operation
-        self.child_nodes: List[NnNode] = child_nodes
-        self.child_input_idxs: Dict[NnNode, List[int]] = child_input_idxs
+        self.child_nodes = nn.ModuleList(child_nodes)
+        self.child_input_idxs: Optional[Dict[NnNode, List[int]]] = child_input_idxs
+        self.is_root = is_root
 
     def forward(self, *inputs) -> torch.Tensor:
         if len(inputs) != 0:
@@ -62,3 +63,24 @@ class GreyBoxNode(NnNode):
         if self.is_root:
             return out.squeeze()
         return out
+
+
+class LeafNode(NnNode):
+    def __init__(self, add_linear_layer: bool = True):
+        super(LeafNode, self).__init__()
+        self.add_linear_layer = add_linear_layer
+        if add_linear_layer:
+            self.linear_layer = nn.Linear(1, 1)
+
+    def forward(self, *inputs) -> torch.Tensor:
+        if len(inputs) != 0:
+            if inputs[0].dim() == 2:
+                inputs = torch.cat(inputs, 0).unsqueeze(1)
+            else:
+                inputs = torch.cat(inputs, 0)
+
+        if inputs.size(2) != 1:
+            raise TypeError("input to leaf node has to be a singular variable, received ", inputs)
+        if self.add_linear_layer:
+            inputs = self.linear_layer(inputs)
+        return inputs
