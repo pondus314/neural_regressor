@@ -33,19 +33,22 @@ if __name__ == '__main__':
     def f(x0, x1, x2):
         return x0 ** 2 + (2.*x1+3.) * (x2+6.)
 
-    leaf_nodes = [nn_node.LeafNode(add_linear_layer=False) for _ in range(1)] +\
-                 [nn_node.LeafNode(add_linear_layer=True) for _ in range(2)]
+    leaf_nodes = [nn_node.LeafNode(0, add_linear_layer=False) for _ in range(1)] +\
+                 [nn_node.LeafNode(i + 1, add_linear_layer=True) for i in range(2)]
     pow_operation = operations.UnivariateOperation(operations.UnivariateOp.POWER, False)
     pow_node = nn_node.GreyBoxNode(operation=pow_operation,
+                                   input_set=[0],
                                    child_nodes=leaf_nodes[0:1],
                                    child_input_idxs=None)
     multi_node = nn_node.GreyBoxNode(
         operation=operations.MultivariateOperation(operations.MultivariateOp.MULTIPLY, False),
+        input_set=[1,2],
         child_nodes=leaf_nodes[1:],
         child_input_idxs={leaf_nodes[1]: [0], leaf_nodes[2]: [1]},
     )
     tree = nn_node.GreyBoxNode(
         operation=operations.MultivariateOperation(operations.MultivariateOp.ADD, False),
+        input_set=[0, 1, 2],
         child_nodes=[pow_node, multi_node],
         child_input_idxs={pow_node: [0], multi_node: [1, 2]},
         is_root=True,
@@ -54,11 +57,12 @@ if __name__ == '__main__':
     dataset = generated_dataset.GeneratorDataset(f, distribution, 20000)
     trainloader = DataLoader(dataset, batch_size=16, shuffle=True)
 
-    hybrid_child_1 = nn_node.BlackBoxNode(1)
-    hybrid_child_2 = nn_node.BlackBoxNode(2)
+    hybrid_child_1 = nn_node.BlackBoxNode(1, [0])
+    hybrid_child_2 = nn_node.BlackBoxNode(2, [1, 2])
 
     hybrid_tree = nn_node.GreyBoxNode(
         operation=operations.MultivariateOperation(operations.MultivariateOp.ADD, False),
+        input_set=[0, 1, 2],
         child_nodes=[hybrid_child_1, hybrid_child_2],
         child_input_idxs={hybrid_child_1: [0], hybrid_child_2: [1, 2]},
         is_root=True
@@ -68,34 +72,36 @@ if __name__ == '__main__':
 
     hybrid_trainer = trainers.ModelTrainer(
         model=hybrid_tree,
-        epochs=100,
+        epochs=50,
         lr=0.001,
         max_lr=0.005,
         train_loader=trainloader,
-        show_losses=True,
+        show_losses=False,
+        add_additive_separability_loss=True,
+        distribution=distribution,
     )
 
     # hybrid_trainer.train()
-    # utils.save_model(hybrid_tree, 'hybrid_tree_100')
-    utils.load_model(hybrid_tree, 'hybrid_tree_100-20211220-185026.pt')
+    # utils.save_model(hybrid_tree, 'hybrid_tree_50_with_additive_loss')
+    utils.load_model(hybrid_tree, 'hybrid_tree_100-20220102-114822.pt')
     hybrid_tree.eval()
-    hybrid_tree.cpu()
 
     black_box = nn_node.BlackBoxNode(3, is_root=True)
     blackbox_trainer = trainers.ModelTrainer(
         model=black_box,
-        epochs=100,
+        epochs=50,
         lr=0.001,
         max_lr=0.005,
         train_loader=trainloader,
-        show_losses=True,
+        show_losses=False,
+        add_additive_separability_loss=True,
+        distribution=distribution,
     )
 
     # blackbox_trainer.train()
-    # utils.save_model(black_box, 'black_box_100')
-    utils.load_model(black_box, 'black_box_100-20211220-185334.pt')
+    # utils.save_model(black_box, 'black_box_50_with_additive_loss')
+    utils.load_model(black_box, 'black_box_100-20220102-115847.pt')
     black_box.eval()
-    black_box.cpu()
 
     tree_trainer = trainers.ModelTrainer(
         model=tree,
@@ -103,21 +109,31 @@ if __name__ == '__main__':
         lr=0.005,
         max_lr=0.01,
         train_loader=trainloader,
-        show_losses=True,
+        show_losses=False,
+        add_additive_separability_loss=True,
+        distribution=distribution,
     )
 
     # tree_trainer.train()
-    # utils.save_model(tree, 'tree_20')
+    # utils.save_model(tree, 'tree_20_with_additive_loss')
     utils.load_model(tree, 'tree_20-20211220-193411.pt')
     tree.eval()
-    tree.cpu()
-    # print(list(tree.parameters()))
+    print(list(tree.parameters()))
 
-    # print(f(2., 0., 3.), f(1., 2., 7.))
-    # print(tree(torch.tensor([[[2., 0., 3.]], [[1., 2., 7.]]])))
-    # print(black_box(torch.tensor([[[2., 0., 3.]], [[1., 2., 7.]]])))
-    # print(hybrid_tree(torch.tensor([[[2., 0., 3.]], [[1., 2., 7.]]])))
+    print(f(2., 0., 3.), f(1., 2., 7.))
+    print(tree(torch.tensor([[[2., 0., 3.]], [[1., 2., 7.]]]).to("cuda")))
+    print(black_box(torch.tensor([[[2., 0., 3.]], [[1., 2., 7.]]]).to("cuda")))
+    print(hybrid_tree(torch.tensor([[[2., 0., 3.]], [[1., 2., 7.]]]).to("cuda")))
 
-    trainers.MetaTrainer.test_additive_separability(tree, distribution)
-    trainers.MetaTrainer.test_additive_separability(black_box, distribution)
-    trainers.MetaTrainer.test_additive_separability(hybrid_tree, distribution)
+    hstree = trainers.MetaTrainer.get_hessian(tree, distribution, "cuda")
+    hsht = trainers.MetaTrainer.get_hessian(hybrid_tree, distribution, "cuda")
+    hsbb = trainers.MetaTrainer.get_hessian(black_box, distribution, "cuda")
+    print(abs(hstree > .5))
+    print(abs(hsht > .5))
+    print(abs(hsbb > .5))
+    tree_meta = trainers.MetaTrainer(dataset, 3, distribution, tree)
+    print(tree_meta.test_additive_separability(tree))
+    print(tree_meta.test_additive_separability(hybrid_tree))
+    print(tree_meta.test_additive_separability(black_box))
+    print(tree_meta.test_additive_separability(multi_node))
+    print(tree_meta.test_multiplicative_separability(multi_node))

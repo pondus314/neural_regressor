@@ -16,13 +16,21 @@ class NnNode(nn.Module, metaclass=abc.ABCMeta):
     def forward(self, inputs) -> torch.Tensor:
         pass
 
+    @abstractmethod
+    def get_black_box_nodes(self) -> List:
+        pass
+
 
 class BlackBoxNode(NnNode):
-    def __init__(self, n_inputs, is_root: bool = False):
+    def __init__(self, n_inputs, input_set: List[int] = None, is_root: bool = False):
         super(BlackBoxNode, self).__init__()
         self.flatten: nn.Flatten = nn.Flatten()
         self.black_box: nn.Sequential = create_black_box(n_inputs)
         self.is_root = is_root
+        if input_set is None:
+            self.input_set = list(range(n_inputs))
+        else:
+            self.input_set = input_set
 
     def forward(self, *inputs) -> torch.Tensor:
         inputs = torch.cat(inputs, 0)
@@ -34,14 +42,18 @@ class BlackBoxNode(NnNode):
             out = out.unsqueeze(1)
         return out
 
+    def get_black_box_nodes(self) -> List[NnNode]:
+        return [self]
+
 
 class GreyBoxNode(NnNode):
-    def __init__(self, operation, child_nodes: List[NnNode], child_input_idxs=None, is_root: bool = False):
+    def __init__(self, operation, input_set: List[int], child_nodes: List[NnNode], child_input_idxs=None, is_root: bool = False):
         super(GreyBoxNode, self).__init__()
         self.operation: Operation = operation
         self.child_nodes = nn.ModuleList(child_nodes)
         self.child_input_idxs: Optional[Dict[NnNode, List[int]]] = child_input_idxs
         self.is_root = is_root
+        self.input_set = input_set
 
     def forward(self, *inputs) -> torch.Tensor:
         if len(inputs) != 0:
@@ -64,13 +76,17 @@ class GreyBoxNode(NnNode):
             return out.squeeze()
         return out
 
+    def get_black_box_nodes(self) -> List[NnNode]:
+        return sum([child.get_black_box_nodes() for child in self.child_nodes], [])
+
 
 class LeafNode(NnNode):
-    def __init__(self, add_linear_layer: bool = True):
+    def __init__(self, input_idx: int, add_linear_layer: bool = True):
         super(LeafNode, self).__init__()
         self.add_linear_layer = add_linear_layer
         if add_linear_layer:
             self.linear_layer = nn.Linear(1, 1)
+        self.input_set = [input_idx]
 
     def forward(self, *inputs) -> torch.Tensor:
         if len(inputs) != 0:
@@ -84,3 +100,6 @@ class LeafNode(NnNode):
         if self.add_linear_layer:
             inputs = self.linear_layer(inputs)
         return inputs
+
+    def get_black_box_nodes(self) -> List[NnNode]:
+        return []
