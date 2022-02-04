@@ -1,9 +1,11 @@
+import operator
 from typing import List, Dict, Optional
 
 import torch
 import abc
 from abc import abstractmethod
 from torch import nn
+import sympy
 
 import operations
 from black_box import create_black_box
@@ -28,6 +30,10 @@ class NnNode(nn.Module, metaclass=abc.ABCMeta):
 
     @abstractmethod
     def get_parent(self):
+        pass
+
+    @abstractmethod
+    def symbolic(self, function_count):
         pass
 
 
@@ -62,6 +68,13 @@ class BlackBoxNode(NnNode):
 
     def get_parent(self):
         return None if self.parent is None else self.parent[0]
+
+    def symbolic(self, function_count: int = 0):
+        variables = sympy.symbols('x_' + ' x_'.join(map(str, self.input_set)))
+        f = sympy.Function('f_' + str(function_count))
+        if len(self.input_set) == 1:
+            variables = [variables]
+        return f(*variables), function_count + 1
 
 
 class GreyBoxNode(NnNode):
@@ -112,6 +125,13 @@ class GreyBoxNode(NnNode):
     def get_parent(self):
         return None if self.parent is None else self.parent[0]
 
+    def symbolic(self, function_count: int = 0):
+        child_expressions = []
+        for child in self.child_nodes:
+            child_expression, function_count = child.symbolic(function_count)
+            child_expressions.append(child_expression)
+        return self.operation.symbolic(child_expressions), function_count
+
 
 class LeafNode(NnNode):
     def __init__(self, input_idx: int, add_linear_layer: bool = True, parent: NnNode = None):
@@ -144,6 +164,13 @@ class LeafNode(NnNode):
     def get_parent(self):
         return None if self.parent is None else self.parent[0]
 
+    def symbolic(self, function_count=0):
+        variable = sympy.symbols('x_' + str(self.input_set[0]))
+        if self.add_linear_layer:
+            parameters = list(map(operator.methodcaller('item'), self.linear_layer.parameters()))
+            return parameters[0] * variable + parameters[1], function_count
+        return variable, function_count
+
 
 if __name__ == '__main__':
     bp = BlackBoxNode(3)
@@ -153,3 +180,4 @@ if __name__ == '__main__':
                      child_nodes=[bc]
                      )
     print(bc, bc.parent)
+    print(lp.symbolic()[0])
