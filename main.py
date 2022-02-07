@@ -106,5 +106,5 @@ if __name__ == '__main__':
     meta_trainer = trainers.MetaTrainer(dataset, 3, distribution)
     # meta_trainer.train(1)
     print(meta_trainer.test_additive_separability(black_box))
-    print(trainers.MetaTrainer.get_hessian(hybrid_child_2, distribution, "cuda", divide_by_f=True))
+    print(trainers.MetaTrainer.sample_and_get_hessian(hybrid_child_2, distribution, "cuda", divide_by_f=True))
     print(meta_trainer.test_multiplicative_separability(hybrid_child_2))
