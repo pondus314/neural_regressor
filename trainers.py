@@ -265,9 +265,11 @@ class MetaTrainer:
                                 break
                         else:
                             self.split_node(black_box_node, possible_split, split_multiplicatively=True)
+                            self.model_loss = self.__training_step(self.model)
                             break  # for now, assume the split works without testing it further beyond the derivative
                     else:
                         self.split_node(black_box_node, possible_split, split_multiplicatively=False)
+                        self.model_loss = self.__training_step(self.model)
                         break  # same as above
 
                     print(self.model)
@@ -319,5 +321,5 @@ if __name__ == '__main__':
     # y = hybrid_tree(x)
     # print(MetaTrainer.get_hessian(x, y), MetaTrainer.get_hessian(x, y, True))
     meta_trainer = MetaTrainer(dataset, 3, distribution)
-    meta_trainer.train(2)
+    meta_trainer.train(5)
     pass

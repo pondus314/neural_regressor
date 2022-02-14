@@ -75,7 +75,7 @@ class UnivariateOperation(Operation):
         elif self.operation_type == UnivariateOp.EXPONENTIAL:
             result = sympy.exp(expression)
         if self.add_linear_layer:
-            parameters = list(map(operator.methodcaller('item'), self.linear_layer.parameters()))
+            parameters = list(map(operator.methodcaller('item'), self.linear_layer.parameters()))  # python
             return parameters[0] * result + parameters[1]
         return result
 
