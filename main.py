@@ -76,15 +76,17 @@ if __name__ == '__main__':
         distribution=distribution,
     )
 
-    # hybrid_trainer.train()
-    # utils.save_model(hybrid_tree, 'hybrid_tree_100_no_additive_loss')
-    utils.load_model(hybrid_tree, 'hybrid_tree_100-20220102-114822.pt')
+    try:
+        utils.load_model(hybrid_tree, 'hybrid_tree.pt')
+    except:
+        hybrid_trainer.train()
+        utils.save_model(hybrid_tree, 'hybrid_tree.pt')
     hybrid_tree.eval()
 
     black_box = nn_node.BlackBoxNode(3)
     blackbox_trainer = trainers.ModelTrainer(
         model=black_box,
-        epochs=100,
+        epochs=50,
         lr=0.001,
         max_lr=0.005,
         train_loader=trainloader,
@@ -93,18 +95,97 @@ if __name__ == '__main__':
         distribution=distribution,
     )
 
-    # blackbox_trainer.train()
-    # utils.save_model(black_box, 'black_box_100_no_additive_loss')
-    utils.load_model(black_box, 'black_box_100-20220102-115847.pt')
+    try:
+        utils.load_model(black_box, 'black_box.pt')
+    except:
+        blackbox_trainer.train()
+        utils.save_model(black_box, 'black_box.pt')
     black_box.eval()
 
-    print(f(2., 0., 3.), f(1., 2., 7.))
-    # print(tree(torch.tensor([[[2., 0., 3.]], [[1., 2., 7.]]]).to("cuda")))
-    print(hybrid_tree(torch.tensor([[[2., 0., 3.]], [[1., 2., 7.]]]).to("cuda")), hybrid_trainer.model_loss)
-    print(black_box(torch.tensor([[[2., 0., 3.]], [[1., 2., 7.]]]).to("cuda")), blackbox_trainer.model_loss)
+    # print("Equation f(2,0,3); f(1,2,7)")
+    # print(f(2., 0., 3.), f(1., 2., 7.))
+    # print("Hybrid f(2,0,3); f(1,2,7)")
+    # print(hybrid_tree(torch.tensor([[[2., 0., 3.]], [[1., 2., 7.]]])))
+    # print("Black Box f(2,0,3); f(1,2,7)")
+    # print(black_box(torch.tensor([[[2., 0., 3.]], [[1., 2., 7.]]])))
 
     meta_trainer = trainers.MetaTrainer(dataset, 3, distribution)
     # meta_trainer.train(1)
-    print(meta_trainer.test_additive_separability(black_box))
-    print(trainers.MetaTrainer.get_hessian(hybrid_child_2, distribution, "cuda", divide_by_f=True))
+    # print(meta_trainer.test_additive_separability(black_box))
+    print(trainers.MetaTrainer.get_hessian(hybrid_child_2, distribution, "cpu", divide_by_f=True))
     print(meta_trainer.test_multiplicative_separability(hybrid_child_2))
+
+    def func(x):
+        return x[:,0] ** 2 + (2.*x[:,1]+3.) * (x[:,2]+6.)
+
+    def func_branch(x):
+        return (2.*x[:,0]+3.) * (x[:,1]+6.)
+
+    def deriv(y, x):
+        return torch.autograd.grad(y.sum(), x, create_graph=True)[0]
+
+    def diff(dydx, x):
+        return torch.stack([torch.autograd.grad(dydx[:, i].sum(), x, create_graph=True)[0] for i in range(n)], dim=2)
+
+    x = torch.tensor([[2.,0.,3.], [1.,2.,7.]], requires_grad=True)
+
+    y_eqn = func(x)
+    y_hyb = hybrid_tree(x)
+
+    y_eqn_branch = func_branch(x[:,1:])
+    y_hyb_branch = hybrid_child_2(x[:,1:])[:,0,0]
+
+
+    dy_eqn = deriv(y_eqn, x)
+    dy_hyb = deriv(y_hyb, x)
+
+    dy_eqn_branch = deriv(y_eqn_branch, x)
+    dy_hyb_branch = deriv(y_hyb_branch, x)
+
+    print("y_eqn", y_eqn)
+    print("y_hyb", y_hyb)
+    print("y_eqn_branch", y_eqn_branch)
+    print("y_hyb_branch", y_hyb_branch)
+    print("dy_eqn", dy_eqn)
+    print("dy_hyb", dy_hyb)
+    print("dy_eqn_branch", dy_eqn_branch)
+    print("dy_hyb_branch", dy_hyb_branch)
+
+    from Visualiser2D import *
+    from functools import partial
+
+    def diff_func_branch(x):
+        x.requires_grad = True
+        y = func_branch(x)
+        return deriv(y,x)[:,1]
+
+    def diff_hyb_branch(x):
+        x.requires_grad = True
+        y = hybrid_child_2(x)
+        return deriv(y,x)[:,1]
+
+    def diff_func_branch_div(x):
+        x.requires_grad = True
+        y = func_branch(x)
+        return deriv(y,x)[:,1] / y
+
+    def diff_hyb_branch_div(x):
+        x.requires_grad = True
+        y = hybrid_child_2(x)[:,0,0] + 186
+        return deriv(y,x)[:,1] / y
+
+    vis = Visualiser2D()
+
+    # vis.update(func, step=0.05, lim=[0,10,0,10], transparent=True, dim=3, other_dim_val=5)
+    # vis.update(hybrid_tree, step=0.05, lim=[0,10,0,10], transparent=False, dim=3, other_dim_val=5)
+
+    # vis.update(func_branch, step=0.05, lim=[0,10,0,10], transparent=True)
+    # vis.update(hybrid_child_2, step=0.05, lim=[0,10,0,10], transparent=False)
+
+    # vis.update(diff_func_branch, step=0.05, lim=[0,10,0,10], transparent=True)
+    # vis.update(diff_hyb_branch, step=0.05, lim=[0,10,0,10], transparent=False)
+
+    vis.update(diff_func_branch_div, step=0.05, lim=[0,10,0,10], transparent=True)
+    vis.update(diff_hyb_branch_div, step=0.05, lim=[0,10,0,10], transparent=False)
+
+    import pdb; pdb.set_trace()

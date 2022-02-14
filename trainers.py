@@ -87,7 +87,7 @@ class MetaTrainer:
         dydx = torch.autograd.grad(y.sum(), x, create_graph=True)[0]
         if divide_by_f:
             d2ydx_divf = torch.stack(
-                [torch.autograd.grad((dydx[:, i] / y).sum(), x, create_graph=True)[0] for i in range(n)], dim=2)
+                [torch.autograd.grad((dydx[:, i] / (y + 186)).sum(), x, create_graph=True)[0] for i in range(n)], dim=2)
             return torch.median(d2ydx_divf, axis=0)[0]
             # sometimes, extreme v
         else:
