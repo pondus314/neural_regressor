@@ -2,7 +2,7 @@ import torch
 from torch import nn
 
 
-def create_black_box(n_inputs: int) -> nn.Sequential:
+def create_mlp(n_inputs: int) -> nn.Sequential:
     layer_size = max(8, n_inputs * 2 // 3)
     black_box = nn.Sequential(
         nn.Linear(n_inputs, layer_size),

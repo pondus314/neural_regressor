@@ -6,7 +6,7 @@ from datetime import datetime
 def save_model(model: torch.nn.Module, name: str):
     path = './res/models/'
 
-    torch.save(model.state_dict(), path + name + '-' + datetime.now().strftime("%Y%m%d-%H%M%S") + '.pt')
+    torch.save(model.state_dict(), path + name + '.pt')
 
 
 def load_model(model: torch.nn.Module, model_name: str):

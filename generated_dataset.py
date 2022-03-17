@@ -4,16 +4,16 @@ from torch.distributions import Distribution
 
 
 class GeneratorDataset(Dataset):
-    def __init__(self, function, input_dist: Distribution, size: int):
+    def __init__(self, function, input_dist: Distribution, size: int, df):
         self.distribution = input_dist
         self.size = size
         self.samples = self.distribution.sample((size,))
 
         self.samples = self.samples.view(size, 1, -1)
-        self.values = [function(*sample[0]) for sample in self.samples]
+        self.values = [(function(*sample[0]), df(*sample[0])) for sample in self.samples]
 
     def __len__(self):
         return self.size
 
     def __getitem__(self, idx):
-        return self.samples[idx], self.values[idx]
+        return self.samples[idx].float(), self.values[idx]
