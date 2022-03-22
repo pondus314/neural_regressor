@@ -45,7 +45,7 @@ class BlackBoxNode(NnNode):
     def __init__(self, n_inputs, input_set: List[int] = None, parent: Optional[NnNode] = None):
         super(BlackBoxNode, self).__init__()
         self.flatten: nn.Flatten = nn.Flatten()
-        self.mlp: nn.Sequential = create_mlp(n_inputs)
+        self.black_box: nn.Sequential = create_mlp(n_inputs)
         self.parent = None if parent is None else [parent]  # stored in a list to prevent registering module parameters
         self.is_root = parent is None
         if input_set is None:
@@ -56,7 +56,7 @@ class BlackBoxNode(NnNode):
     def forward(self, *inputs) -> torch.Tensor:
         inputs = torch.cat(inputs, 0)
         x = self.flatten(inputs)
-        out = self.mlp(x)
+        out = self.black_box(x)
         if self.is_root:
             out = out.squeeze()
         elif out.dim() == 2:
@@ -85,7 +85,7 @@ class BlackBoxNode(NnNode):
             if isinstance(m, nn.Linear):
                 m.reset_parameters()
 
-        self.mlp.apply(weight_reset)
+        self.black_box.apply(weight_reset)
 
 
 class GreyBoxNode(NnNode):

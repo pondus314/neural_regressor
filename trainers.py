@@ -43,6 +43,8 @@ class ModelTrainer:
 
     def train(self):
         self.model.train()
+        black_box_nodes = self.model.get_black_box_nodes()
+
         for epoch in range(self.epochs):
             print(epoch + 1, "/", self.epochs)
             for batch, (x, (y, dy)) in enumerate(self.train_loader):
@@ -160,7 +162,7 @@ class MetaTrainer:
         return leaf_node
 
     def split_node(self, black_box_node, possible_split, split_multiplicatively):
-        inputs_tensor = torch.tensor(black_box_node.input_set)
+        inputs_tensor = torch.tensor(black_box_node.input_set)  # to allow indexing by multiple indices at the same time
         new_leaves = [nn_node.BlackBoxNode(len(input_set), inputs_tensor[input_set].tolist()) for input_set in possible_split]
         print(*[leaf.input_set for leaf in new_leaves])
         leaf_inputs = {new_leaves[i]: [possible_split[i]] for i in range(len(possible_split))}
@@ -178,9 +180,12 @@ class MetaTrainer:
 
         self.replace_in_parent(black_box_node, new_node)
 
-    def create_univariate_node(self, black_box_node, backup_model):
+    def create_univariate_node(self, black_box_node):
         parent = black_box_node.get_parent()
+        old_node = black_box_node
         for operation_type in operations.UnivariateOp:
+            if operation_type == operations.UnivariateOp.POWER and operation_type == parent.operation.operation_type:
+                continue
             operation = operations.UnivariateOperation(
                 operation_type=operation_type,
             )
@@ -196,14 +201,14 @@ class MetaTrainer:
                 input_set=black_box_node.input_set,
             )
 
-            self.replace_in_parent(black_box_node, new_node)
-            black_box_node = new_node
+            self.replace_in_parent(old_node, new_node)
+            old_node = new_node
             new_loss = self.__training_step(self.model)
             if new_loss < self.model_loss:
                 self.model_loss = new_loss
                 print(self.model.symbolic())
                 return True
-        self.model = backup_model
+        self.replace_in_parent(old_node, black_box_node)
         return False
 
     def train(self, steps=None, skip_initial_training=False):
@@ -222,7 +227,6 @@ class MetaTrainer:
                     print("regression finished")
                     return
                 for idx, black_box_node in enumerate(black_box_nodes):
-                    backup_model = copy.deepcopy(self.model)
                     if len(black_box_node.input_set) == 1:
                         # if no univariate transformation reduces loss, try to turn black box into leaf
 
@@ -232,18 +236,19 @@ class MetaTrainer:
                             self.model_loss = new_loss
                             print(self.model.symbolic())
                             break
+                        self.replace_in_parent(leaf_node, black_box_node)
 
                         # attempt to create univariate transformation middle node
-                        result = self.create_univariate_node(leaf_node, backup_model)
+                        result = self.create_univariate_node(black_box_node)
                         if result:
                             break
                         continue
 
                     possible_split = self.test_separability(black_box_node)
                     if len(possible_split) == 1:
-                        possible_split = self.test_separability(black_box_node, multiplicative=True)
+                        possible_split = self.test_separability(black_box_node, cutoff=0.5, multiplicative=True)
                         if len(possible_split) == 1:
-                            result = self.create_univariate_node(black_box_node, backup_model)
+                            result = self.create_univariate_node(black_box_node)
                             if result:
                                 break
                         else:
@@ -275,8 +280,9 @@ class MetaTrainer:
         )
         non_zero = abs(hessian) > cutoff
         non_zero = non_zero & non_zero.T
+
         graph = nx.from_numpy_array(non_zero.cpu().numpy())
-        components = list(nx.algorithms.components.connected_components(graph))
+        components = list(map(list, nx.algorithms.components.connected_components(graph)))
         if len(components) == 1 and check_cliques:
             cliques = list(nx.algorithms.clique.find_cliques(graph))
             return cliques
@@ -294,21 +300,49 @@ if __name__ == '__main__':
     # distribution = torch.distributions.HalfNormal(torch.ones((3,))*10)
     # dataset = generated_dataset.GeneratorDataset(f, distribution, 20000, df)
     # hybrid_child_1 = nn_node.BlackBoxNode(1, [0])
-    # power_node = nn_node.GreyBoxNode(operation=operations.UnivariateOperation(operation_type=operations.UnivariateOp.POWER, add_linear_layer=False),
-    #                                  child_nodes=[hybrid_child_1],
-    #                                  child_input_idxs={hybrid_child_1: [0]},
-    #                                  input_set=[0])
+    # # power_node = nn_node.GreyBoxNode(operation=operations.UnivariateOperation(operation_type=operations.UnivariateOp.POWER, add_linear_layer=False),
+    # #                                  child_nodes=[hybrid_child_1],
+    # #                                  child_input_idxs={hybrid_child_1: [0]},
+    # #                                  input_set=[0])
     # hybrid_child_2 = nn_node.BlackBoxNode(2, [1, 2])
     #
     # hybrid_tree = nn_node.GreyBoxNode(
     #     operation=operations.MultivariateOperation(operations.MultivariateOp.ADD, False),
     #     input_set=[0, 1, 2],
-    #     child_nodes=[power_node, hybrid_child_2],
-    #     child_input_idxs={power_node: [0], hybrid_child_2: [1, 2]},
+    #     child_nodes=[hybrid_child_1, hybrid_child_2],
+    #     child_input_idxs={hybrid_child_1: [0], hybrid_child_2: [1, 2]},
     # )
     # print(hybrid_tree.symbolic())
     # utils.load_model(hybrid_tree, "hybrid_tree_100-20220102-114822.pt")
+    #
     # hybrid_tree.to("cuda")
+    #
+    # multiply_node = nn_node.BlackBoxNode(2)
+    #
+    # def f2(x1, x2):
+    #     return (2.*x1+3.) * (x2+6.)
+    #
+    # def df2(x1, x2):
+    #     return 2. * (x2 + 6.), 2.*x1 + 3.
+    #
+    # distribution2 = torch.distributions.HalfNormal(torch.ones((2,))*10)
+    # dataset2 = generated_dataset.GeneratorDataset(f2, distribution2, 20000, df2)
+    # dataloader2 = DataLoader(dataset2, batch_size=16, shuffle=True)
+    # # trainer = ModelTrainer(
+    # #     model=multiply_node,
+    # #     epochs=40,
+    # #     lr=0.001,
+    # #     max_lr=0.005,
+    # #     train_loader=dataloader2,
+    # #     show_losses=False,
+    # #     add_separability_loss=False,
+    # # )
+    # # trainer.train()
+    # utils.load_model(multiply_node, "multiplicative_split.pt")
+    # multiply_node.to("cuda")
+    # MetaTrainer.sample_and_get_hessian(multiply_node, distribution2, "cuda", divide_by_f=True, n_tests=300)
+    # print()
+
     # MetaTrainer.sample_and_get_hessian(hybrid_child_2, distribution, "cuda", divide_by_f=True, n_tests=100)
     # MetaTrainer.sample_and_get_hessian(hybrid_child_2, distribution, "cuda", divide_by_f=True, n_tests=1000)
     # print(MetaTrainer.sample_and_get_hessian(hybrid_tree, distribution, "cuda", divide_by_f=True, n_tests=2))
@@ -328,7 +362,7 @@ if __name__ == '__main__':
 
     distribution = torch.distributions.HalfNormal(torch.ones((3,))*10)
     dataset = generated_dataset.GeneratorDataset(f, distribution, 20000, df)
-
+    # print(MetaTrainer.sample_and_get_hessian(hybrid_tree, distribution, "cuda", divide_by_f=True))
     meta_trainer = MetaTrainer(dataset, 3, distribution)
     # meta_trainer = MetaTrainer(dataset, 3, distribution)
     meta_trainer.train(5)
