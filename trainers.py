@@ -23,7 +23,8 @@ class ModelTrainer:
                  max_lr: float,
                  train_loader: DataLoader,
                  show_losses: bool = False,
-                 add_separability_loss: bool = False):
+                 add_separability_loss: bool = False,
+                 separability_epochs: int = 20):
         self.device = "cuda" if torch.cuda.is_available() else "cpu"
         self.model = model
         self.loss_fn = nn.MSELoss()
@@ -35,15 +36,25 @@ class ModelTrainer:
         self.scheduler = torch.optim.lr_scheduler.OneCycleLR(
             optimizer=self.optimizer,
             max_lr=max_lr,
-            epochs=epochs,
+            epochs=epochs +5,
             steps_per_epoch=len(self.train_loader)
         )
         self.add_separability_loss = add_separability_loss
+        self.separability_epochs = separability_epochs
         self.model_loss = None
 
     def train(self):
         self.model.train()
         black_box_nodes = self.model.get_black_box_nodes()
+        additive = []
+        multiplicative = []
+        for black_box_node in black_box_nodes:
+            parent = black_box_node.get_parent()
+            if len(black_box_node.input_set) > 1 and parent is not None:
+                if parent.operation.operation_type == operations.MultivariateOp.ADD:
+                    multiplicative.append(black_box_node)
+                elif parent.operation.operation_type == operations.MultivariateOp.MULTIPLY:
+                    additive.append(black_box_node)
 
         for epoch in range(self.epochs):
             print(epoch + 1, "/", self.epochs)
@@ -56,10 +67,16 @@ class ModelTrainer:
                 dfdx = torch.autograd.grad(pred.sum(), x, create_graph=True)[0].squeeze()
                 derivative_loss = self.loss_fn(dfdx, dy)
                 loss = derivative_loss + direct_loss
-                if self.add_separability_loss:
-                    add_separability_loss = torch.sum(torch.abs(MetaTrainer.get_hessian(x, pred)))
-                    mult_separability_loss = torch.sum(torch.abs(MetaTrainer.get_hessian(x, pred, divide_by_f=True)))
-                    loss += add_separability_loss + mult_separability_loss
+                # if self.add_separability_loss:
+                #     add_separability_loss = 0
+                #     for node in additive:
+                #         node_pred = node(x[:, node.input_set])
+                #         add_separability_loss += torch.sum(torch.abs(MetaTrainer.get_hessian(x, node_pred)))
+                #     mult_separability_loss = 0
+                #     for node in multiplicative:
+                #         node_pred = node(x[:, :, node.input_set])
+                #         mult_separability_loss += 10 * torch.sum(torch.abs(MetaTrainer.get_hessian(x, node_pred, divide_by_f=True)))
+                #     loss += add_separability_loss + mult_separability_loss
                 self.optimizer.zero_grad()
                 loss.backward()
                 self.optimizer.step()
@@ -67,8 +84,40 @@ class ModelTrainer:
                 if self.show_losses and batch % 50 == 0:
                     print(loss.item())
                 if self.model_loss is None:
-                    self.model_loss = loss
+                    self.model_loss = derivative_loss + direct_loss
                 self.model_loss = min(loss, self.model_loss)
+
+        if self.add_separability_loss:
+            for epoch in range(self.separability_epochs):
+                print(epoch + 1, "/", self.separability_epochs, "s")
+                for batch, (x, (y, dy)) in enumerate(self.train_loader):
+                    dy = torch.stack(dy).T
+                    x, y, dy = (x.to(self.device).float(), y.to(self.device).float(), dy.to(self.device).float())
+                    x.requires_grad_(True)
+                    pred = self.model(x)
+                    direct_loss = self.loss_fn(pred, y)
+                    dfdx = torch.autograd.grad(pred.sum(), x, create_graph=True)[0].squeeze()
+                    derivative_loss = self.loss_fn(dfdx, dy)
+                    loss = derivative_loss + direct_loss
+                    add_separability_loss = 0
+                    for node in additive:
+                        node_pred = node(x[:, node.input_set])
+                        add_separability_loss += torch.sum(torch.abs(MetaTrainer.get_hessian(x, node_pred)))
+                    mult_separability_loss = 0
+                    for node in multiplicative:
+                        node_pred = node(x[:, :, node.input_set])
+                        mult_separability_loss += 10 * torch.sum(torch.abs(MetaTrainer.get_hessian(x, node_pred, divide_by_f=True)))
+                    loss += add_separability_loss + mult_separability_loss
+                    self.optimizer.zero_grad()
+                    loss.backward()
+                    self.optimizer.step()
+                    # self.scheduler.step()
+                    if self.show_losses and batch % 50 == 0:
+                        print(loss.item())
+                    if self.model_loss is None:
+                        self.model_loss = derivative_loss + direct_loss
+                    self.model_loss = min(loss, self.model_loss)
+
 
     def get_loss(self):
         if self.model_loss is None:
@@ -82,10 +131,6 @@ class ModelTrainer:
                 dfdx = torch.autograd.grad(pred.sum(), x, create_graph=True)[0].squeeze()
                 derivative_loss = self.loss_fn(dfdx, dy)
                 loss = derivative_loss + direct_loss
-                if self.add_separability_loss:
-                    add_separability_loss = torch.sum(torch.abs(MetaTrainer.get_hessian(x, pred)))
-                    mult_separability_loss = torch.sum(torch.abs(MetaTrainer.get_hessian(x, pred, divide_by_f=True)))
-                    loss += add_separability_loss + mult_separability_loss
                 if self.model_loss is None:
                     self.model_loss = loss
                 self.model_loss = min(loss, self.model_loss)
@@ -125,12 +170,12 @@ class MetaTrainer:
     def __training_step(self, new_model):
         trainer = ModelTrainer(
             model=new_model,
-            epochs=40,
-            lr=0.001,
-            max_lr=0.005,
+            epochs=100,
+            lr=0.005,
+            max_lr=0.01,
             train_loader=self.dataloader,
             show_losses=False,
-            add_separability_loss=False,
+            add_separability_loss=True,
         )
         new_model.reset_weights()
         trainer.train()
@@ -246,7 +291,7 @@ class MetaTrainer:
 
                     possible_split = self.test_separability(black_box_node)
                     if len(possible_split) == 1:
-                        possible_split = self.test_separability(black_box_node, cutoff=0.5, multiplicative=True)
+                        possible_split = self.test_separability(black_box_node, cutoff=0.001, multiplicative=True)
                         if len(possible_split) == 1:
                             result = self.create_univariate_node(black_box_node)
                             if result:
@@ -291,32 +336,33 @@ class MetaTrainer:
 
 
 if __name__ == '__main__':
-    # def f(x0, x1, x2):
-    #     return x0 ** 2 + (2.*x1+3.) * (x2+6.)
-    #
-    # def df(x0, x1, x2):
-    #     return 2.*x0, 2. * (x2 + 6.), 2.*x1 + 3.
-    #
-    # distribution = torch.distributions.HalfNormal(torch.ones((3,))*10)
-    # dataset = generated_dataset.GeneratorDataset(f, distribution, 20000, df)
-    # hybrid_child_1 = nn_node.BlackBoxNode(1, [0])
-    # # power_node = nn_node.GreyBoxNode(operation=operations.UnivariateOperation(operation_type=operations.UnivariateOp.POWER, add_linear_layer=False),
-    # #                                  child_nodes=[hybrid_child_1],
-    # #                                  child_input_idxs={hybrid_child_1: [0]},
-    # #                                  input_set=[0])
-    # hybrid_child_2 = nn_node.BlackBoxNode(2, [1, 2])
-    #
-    # hybrid_tree = nn_node.GreyBoxNode(
-    #     operation=operations.MultivariateOperation(operations.MultivariateOp.ADD, False),
-    #     input_set=[0, 1, 2],
-    #     child_nodes=[hybrid_child_1, hybrid_child_2],
-    #     child_input_idxs={hybrid_child_1: [0], hybrid_child_2: [1, 2]},
-    # )
-    # print(hybrid_tree.symbolic())
+    def f(x0, x1, x2):
+        return x0 ** 2 + (2.*x1+3.) * (x2+6.)
+
+    def df(x0, x1, x2):
+        return 2.*x0, 2. * (x2 + 6.), 2.*x1 + 3.
+
+    distribution = torch.distributions.HalfNormal(torch.ones((3,))*10)
+    dataset = generated_dataset.GeneratorDataset(f, distribution, 20000, df)
+    dataloader = DataLoader(dataset, batch_size=16, shuffle=True)
+    hybrid_child_1 = nn_node.BlackBoxNode(1, [0])
+    # power_node = nn_node.GreyBoxNode(operation=operations.UnivariateOperation(operation_type=operations.UnivariateOp.POWER, add_linear_layer=False),
+    #                                  child_nodes=[hybrid_child_1],
+    #                                  child_input_idxs={hybrid_child_1: [0]},
+    #                                  input_set=[0])
+    hybrid_child_2 = nn_node.BlackBoxNode(2, [1, 2])
+
+    hybrid_tree = nn_node.GreyBoxNode(
+        operation=operations.MultivariateOperation(operations.MultivariateOp.ADD, False),
+        input_set=[0, 1, 2],
+        child_nodes=[hybrid_child_1, hybrid_child_2],
+        child_input_idxs={hybrid_child_1: [0], hybrid_child_2: [1, 2]},
+    )
+    print(hybrid_tree.symbolic())
     # utils.load_model(hybrid_tree, "hybrid_tree_100-20220102-114822.pt")
-    #
-    # hybrid_tree.to("cuda")
-    #
+
+    hybrid_tree.to("cuda")
+
     # multiply_node = nn_node.BlackBoxNode(2)
     #
     # def f2(x1, x2):
@@ -328,23 +374,25 @@ if __name__ == '__main__':
     # distribution2 = torch.distributions.HalfNormal(torch.ones((2,))*10)
     # dataset2 = generated_dataset.GeneratorDataset(f2, distribution2, 20000, df2)
     # dataloader2 = DataLoader(dataset2, batch_size=16, shuffle=True)
-    # # trainer = ModelTrainer(
-    # #     model=multiply_node,
-    # #     epochs=40,
-    # #     lr=0.001,
-    # #     max_lr=0.005,
-    # #     train_loader=dataloader2,
-    # #     show_losses=False,
-    # #     add_separability_loss=False,
-    # # )
-    # # trainer.train()
-    # utils.load_model(multiply_node, "multiplicative_split.pt")
+    trainer = ModelTrainer(
+        model=hybrid_tree,
+        epochs=60,
+        lr=0.005,
+        max_lr=0.01,
+        train_loader=dataloader,
+        show_losses=False,
+        add_separability_loss=True,
+        separability_epochs=40,
+    )
+    trainer.train()
+    utils.save_model(hybrid_tree, "with_separability_separate")
+    # utils.save_model(multiply_node, "single_node_with_separability_multiply")
     # multiply_node.to("cuda")
     # MetaTrainer.sample_and_get_hessian(multiply_node, distribution2, "cuda", divide_by_f=True, n_tests=300)
-    # print()
+    print()
 
-    # MetaTrainer.sample_and_get_hessian(hybrid_child_2, distribution, "cuda", divide_by_f=True, n_tests=100)
-    # MetaTrainer.sample_and_get_hessian(hybrid_child_2, distribution, "cuda", divide_by_f=True, n_tests=1000)
+    MetaTrainer.sample_and_get_hessian(hybrid_child_2, distribution, "cuda", divide_by_f=True, n_tests=100)
+    MetaTrainer.sample_and_get_hessian(hybrid_child_2, distribution, "cuda", divide_by_f=True, n_tests=1000)
     # print(MetaTrainer.sample_and_get_hessian(hybrid_tree, distribution, "cuda", divide_by_f=True, n_tests=2))
     # MetaTrainer.sample_and_get_hessian(hybrid_child_2, distribution, "cuda", divide_by_f=True, n_tests=100000)
     # MetaTrainer.sample_and_get_hessian(hybrid_child_2, distribution, "cuda", divide_by_f=True, n_tests=1000000)
@@ -354,16 +402,16 @@ if __name__ == '__main__':
     # print(MetaTrainer.get_hessian(x, y), MetaTrainer.get_hessian(x, y, True))
 
 
-    def f(x0, x1, x2):
-        return x0 ** 2 + x1 * x2
+    # def f(x0, x1, x2):
+    #     return x0 ** 2 + x1 * x2
+    #
+    # def df(x0, x1, x2):
+    #     return 2.*x0, x2, x1
 
-    def df(x0, x1, x2):
-        return 2.*x0, x2, x1
-
-    distribution = torch.distributions.HalfNormal(torch.ones((3,))*10)
-    dataset = generated_dataset.GeneratorDataset(f, distribution, 20000, df)
+    # distribution = torch.distributions.HalfNormal(torch.ones((3,))*10)
+    # dataset = generated_dataset.GeneratorDataset(f, distribution, 20000, df)
     # print(MetaTrainer.sample_and_get_hessian(hybrid_tree, distribution, "cuda", divide_by_f=True))
-    meta_trainer = MetaTrainer(dataset, 3, distribution)
+    meta_trainer = MetaTrainer(dataset, 3, distribution, model=hybrid_tree)
     # meta_trainer = MetaTrainer(dataset, 3, distribution)
-    meta_trainer.train(5)
+    meta_trainer.train(3)
     print(meta_trainer.model.symbolic())
