@@ -52,11 +52,15 @@ class BlackBoxNode(NnNode):
             self.input_set = list(range(n_inputs))
         else:
             self.input_set = input_set
+        self.sep_bias = nn.Linear(0, 1)
+        self.sep_bias.bias.requires_grad = False
+        self.bias_enabled = False
 
     def forward(self, *inputs) -> torch.Tensor:
         inputs = torch.cat(inputs, 0)
         x = self.flatten(inputs)
         out = self.black_box(x)
+        out = self.sep_bias(out)
         if self.is_root:
             out = out.squeeze()
         elif out.dim() == 2:
@@ -78,7 +82,10 @@ class BlackBoxNode(NnNode):
         f = sympy.Function('f_' + str(function_count))
         if len(self.input_set) == 1:
             variables = [variables]
-        return f(*variables), function_count + 1
+        if self.bias_enabled:
+            return f(*variables) + self.sep_bias.bias.item(), function_count + 1
+        else:
+            return f(*variables), function_count + 1
 
     def reset_weights(self):
         def weight_reset(m):
@@ -86,6 +93,15 @@ class BlackBoxNode(NnNode):
                 m.reset_parameters()
 
         self.black_box.apply(weight_reset)
+
+    def switch_training(self):
+        self.bias_enabled = not self.bias_enabled
+        if self.bias_enabled:
+            self.black_box.requires_grad_(False)
+            self.sep_bias.bias.requires_grad = True
+        else:
+            self.black_box.requires_grad_(True)
+            self.sep_bias.bias.requires_grad = False
 
 
 class GreyBoxNode(NnNode):
